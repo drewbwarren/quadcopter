@@ -10,9 +10,9 @@
 #include <sys/stat.h>
 #include <curses.h>
 
-//gcc -o week1 week_1.cpp -lwiringPi -lncurses -lm
+//gcc -o student_code student_code.cpp -lwiringPi -lncurses -lm
 
-#define frequency 25000000.0
+#define frequency  25000000.0
 #define CONFIG           0x1A
 #define SMPLRT_DIV       0x19
 #define GYRO_CONFIG      0x1B
@@ -21,7 +21,14 @@
 #define USER_CTRL        0x6A  // Bit 7 enable DMP, bit 3 reset DMP
 #define PWR_MGMT_1       0x6B // Device defaults to the SLEEP mode
 #define PWR_MGMT_2       0x6C
-
+#define PWM_MAX 1300
+#define frequency 25000000.0
+#define LED0 0x6
+#define LED0_ON_L 0x6
+#define LED0_ON_H 0x7
+#define LED0_OFF_L 0x8
+#define LED0_OFF_H 0x9
+#define LED_MULTIPLYER 4
 
 enum Ascale {
   AFS_2G = 0,
@@ -45,6 +52,10 @@ void setup_keyboard();
 void trap(int signal);
 void pulse(int heartbeat);
 void safety_check(char c, int h);
+void init_pwm();
+void init_motor(uint8_t channel);
+void set_PWM( uint8_t channel, float time_on_us);
+void pid_update();
 
 //global variables
 int imu;
@@ -77,18 +88,26 @@ struct Keyboard {
 };
 Keyboard* shared_memory;
 int run_program=1;
-
+int pwm;
 
 
 
 int main (int argc, char *argv[])
 {
+    init_pwm();
+    init_motor(0);
+    init_motor(1);
+    init_motor(2);
+    init_motor(3);
+    delay(1000);
 
     setup_imu();
     calibrate_imu();
 
     setup_keyboard();
     signal(SIGINT, &trap);
+
+    printf("Motor 1, Motor 2, Motor 3, Motor 4, Pitch\n");//Debug part 1
 
     while(run_program==1)
     {
@@ -97,14 +116,45 @@ int main (int argc, char *argv[])
 
       Keyboard keyboard=*shared_memory;
       safety_check(keyboard.key_press, keyboard.heartbeat);
-      //pulse(keyboard.heartbeat);
-      //printf("keypress\t%c\theartbeat\t%d\tversion\t%d\n",keyboard.key_press,keyboard.heartbeat,keyboard.version);
-      //printf("current time\t%ld\tprevious time\t%ld\n",time_curr,time_prev);
+
+      pid_update();
     }
 
+    set_PWM(0,1000);
+    set_PWM(1,1000);
+    set_PWM(2,1000);
+    set_PWM(3,1000);
 
 
-  return 0;
+    return 0;
+}
+
+void pid_update()
+{
+  float roll_error;
+  roll_error = 0 - roll_angle;
+
+  int neutral_power;
+  neutral_power = 1100;
+
+  float P;
+  P = 15;
+
+  float speed;
+  float oldspeed;
+
+  speed = neutral_power + roll_error*P;
+  oldspeed = speed;
+
+  set_PWM(0,speed);
+  set_PWM(2,speed);
+
+  speed = neutral_power - roll_error*P;
+
+  set_PWM(1,speed);
+  set_PWM(3,speed);
+
+  printf("%f, %f, %f, %f, %f\n",oldspeed, speed, oldspeed, speed, roll_angle);//debug part 2
 }
 
 void calibrate_imu()
@@ -353,6 +403,10 @@ void setup_keyboard()
 
 void trap(int signal)
 {
+   set_PWM(0,1000);
+   set_PWM(1,1000);
+   set_PWM(2,1000);
+   set_PWM(3,1000);
 
    printf("ending program\n\r");
 
@@ -377,45 +431,133 @@ void pulse(int heartbeat)
 
 
 
-// TODO: print values that cause the program to stop
 void safety_check(char keypress, int heartbeat)
 {
   if (imu_data[0] > 300 || imu_data[1] > 300 || imu_data[2] > 300)
   {
     run_program = 0;
-    printf("Gyro rate over 300\n");
+    set_PWM(0,1000);
+    set_PWM(1,1000);
+    set_PWM(2,1000);
+    set_PWM(3,1000);
+    printf("Gyro rate over 300. x: %f y: %f z: %f\n",imu_data[0],imu_data[1],imu_data[2]);
   }
 
   if (imu_data[3] > 1.8 || imu_data[4] > 1.8 || imu_data[5] > 1.8)
   {
     run_program = 0;
-    printf("You hit something (accel > 1.8)\n");
+
+    printf("Impact! Accel > 1.8. x: %f y: %f z: %f\n",imu_data[3],imu_data[4],imu_data[5]);
   }
 
   if (imu_data[3] < .25 && imu_data[4] < .25 && imu_data[5] < .25)
   {
     run_program = 0;
-    printf("Quadrotor is free falling (accel < .25)\n");
+    printf("Free falling! Accel < .25. x: %f y: %f z: %f\n",imu_data[3],imu_data[4],imu_data[5]);
   }
 
   if (roll_angle > 45 || roll_angle < -45)
   {
     run_program = 0;
-    printf("Too much roll\n");
+    set_PWM(0,1000);
+    set_PWM(1,1000);
+    set_PWM(2,1000);
+    set_PWM(3,1000);
+    printf("Excess Roll! %f\n",roll_angle);
   }
 
   if (pitch_angle > 45 || pitch_angle < -45)
   {
     run_program = 0;
-    printf("Too much pitch\n");
+    printf("Excess pitch! %f\n",pitch_angle);
   }
 
-  if(keypress==32) 
-  { 
-    run_program=0; 
+/*  if(keypress==32)
+  {
+    run_program=0;
     printf("space pressed\n");
   }
 
   pulse(heartbeat);
+*/
+}
 
+void init_pwm()
+{
+
+    pwm=wiringPiI2CSetup (0x40);
+    if(pwm==-1)
+    {
+      printf("-----cant connect to I2C device %d --------\n",pwm);
+
+    }
+    else
+    {
+
+      float freq =400.0*.95;
+      float prescaleval = 25000000;
+      prescaleval /= 4096;
+      prescaleval /= freq;
+      prescaleval -= 1;
+      uint8_t prescale = floor(prescaleval+0.5);
+      int settings = wiringPiI2CReadReg8(pwm, 0x00) & 0x7F;
+      int sleep	= settings | 0x10;
+      int wake 	= settings & 0xef;
+      int restart = wake | 0x80;
+      wiringPiI2CWriteReg8(pwm, 0x00, sleep);
+      wiringPiI2CWriteReg8(pwm, 0xfe, prescale);
+      wiringPiI2CWriteReg8(pwm, 0x00, wake);
+      delay(10);
+      wiringPiI2CWriteReg8(pwm, 0x00, restart|0x20);
+    }
+}
+
+void init_motor(uint8_t channel)
+{
+	int on_value=0;
+
+	int time_on_us=900;
+	uint16_t off_value=round((time_on_us*4096.f)/(1000000.f/400.0));
+
+	wiringPiI2CWriteReg8(pwm, LED0_ON_L + LED_MULTIPLYER * channel, on_value & 0xFF);
+	wiringPiI2CWriteReg8(pwm, LED0_ON_H + LED_MULTIPLYER * channel, on_value >> 8);
+	wiringPiI2CWriteReg8(pwm, LED0_OFF_L + LED_MULTIPLYER * channel, off_value & 0xFF);
+	wiringPiI2CWriteReg8(pwm, LED0_OFF_H + LED_MULTIPLYER * channel, off_value >> 8);
+	delay(100);
+
+	 time_on_us=1200;
+	 off_value=round((time_on_us*4096.f)/(1000000.f/400.0));
+
+	wiringPiI2CWriteReg8(pwm, LED0_ON_L + LED_MULTIPLYER * channel, on_value & 0xFF);
+	wiringPiI2CWriteReg8(pwm, LED0_ON_H + LED_MULTIPLYER * channel, on_value >> 8);
+	wiringPiI2CWriteReg8(pwm, LED0_OFF_L + LED_MULTIPLYER * channel, off_value & 0xFF);
+	wiringPiI2CWriteReg8(pwm, LED0_OFF_H + LED_MULTIPLYER * channel, off_value >> 8);
+	delay(100);
+
+	 time_on_us=1000;
+	 off_value=round((time_on_us*4096.f)/(1000000.f/400.0));
+
+	wiringPiI2CWriteReg8(pwm, LED0_ON_L + LED_MULTIPLYER * channel, on_value & 0xFF);
+	wiringPiI2CWriteReg8(pwm, LED0_ON_H + LED_MULTIPLYER * channel, on_value >> 8);
+	wiringPiI2CWriteReg8(pwm, LED0_OFF_L + LED_MULTIPLYER * channel, off_value & 0xFF);
+	wiringPiI2CWriteReg8(pwm, LED0_OFF_H + LED_MULTIPLYER * channel, off_value >> 8);
+	delay(100);
+
+}
+
+void set_PWM( uint8_t channel, float time_on_us)
+{
+//  if(run_program==1)
+  {
+    if(time_on_us>PWM_MAX)
+    {
+      time_on_us=PWM_MAX;
+    }
+    else if(time_on_us<1000)
+    {
+      time_on_us=1000;
+    }
+  	uint16_t off_value=round((time_on_us*4096.f)/(1000000.f/400.0));
+  	wiringPiI2CWriteReg16(pwm, LED0_OFF_L + LED_MULTIPLYER * channel,off_value);
+  }
 }
