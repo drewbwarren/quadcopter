@@ -41,6 +41,10 @@ int setup_imu();
 void calibrate_imu();
 void read_imu();
 void update_filter();
+void setup_keyboard();
+void trap(int signal);
+void pulse(int heartbeat);
+void safety_check(char c, int h);
 
 //global variables
 int imu;
@@ -51,12 +55,30 @@ float roll_calibration=0;
 float pitch_calibration=0;
 float accel_z_calibration=0;
 float imu_data[6]; //gyro xyz, accel xyz
+float imu_cal[6]; // for finding the bias
 long time_curr;
 long time_prev;
 struct timespec te;
 float yaw=0;
 float pitch_angle=0;
 float roll_angle=0;
+float convert_g=1.0;
+float A=.02;
+int previous_beat = 0;
+long last_beat = 0;
+struct Keyboard {
+
+  char key_press;
+
+  int heartbeat;
+
+  int version;
+
+};
+Keyboard* shared_memory;
+int run_program=1;
+
+
 
 
 int main (int argc, char *argv[])
@@ -65,23 +87,34 @@ int main (int argc, char *argv[])
     setup_imu();
     calibrate_imu();
 
+    setup_keyboard();
+    signal(SIGINT, &trap);
 
-
-    while(1)
+    while(run_program==1)
     {
       read_imu();
       update_filter();
 
-
+      Keyboard keyboard=*shared_memory;
+      safety_check(keyboard.key_press, keyboard.heartbeat);
+      //pulse(keyboard.heartbeat);
+      //printf("keypress\t%c\theartbeat\t%d\tversion\t%d\n",keyboard.key_press,keyboard.heartbeat,keyboard.version);
+      //printf("current time\t%ld\tprevious time\t%ld\n",time_curr,time_prev);
     }
 
 
 
-
+  return 0;
 }
 
 void calibrate_imu()
 {
+  imu_cal[0] = 0.0;
+  imu_cal[1] = 0.0;
+  imu_cal[2] = 0.0;
+  imu_cal[3] = 0.0;
+  imu_cal[4] = 0.0;
+  imu_cal[5] = 0.0;
 
   /*
   x_gyro_calibration=??
@@ -91,6 +124,25 @@ void calibrate_imu()
   pitch_calibration=??
   accel_z_calibration=??
   */
+
+  for(int i = 0; i<1000; i++)
+  {
+    read_imu();
+    update_filter();
+  }
+  x_gyro_calibration = imu_cal[0] / 1000.0;
+  y_gyro_calibration = imu_cal[1] / 1000.0;
+  z_gyro_calibration = imu_cal[2] / 1000.0;
+  accel_z_calibration = imu_cal[3] / 1000.0;
+
+  convert_g = 1 / accel_z_calibration;
+
+  float x_avg = imu_cal[4] / 1000.0;
+  float y_avg = imu_cal[5] / 1000.0;
+
+  roll_calibration = (atan2(y_avg,accel_z_calibration))*180.0/3.1415;
+  pitch_calibration = (atan2(x_avg,accel_z_calibration))*180.0/3.1415;
+
 printf("calibration complete, %f %f %f %f %f %f\n\r",x_gyro_calibration,y_gyro_calibration,z_gyro_calibration,roll_calibration,pitch_calibration,accel_z_calibration);
 
 
@@ -103,6 +155,7 @@ void read_imu()
   float az=0;
   float ay=0;
   int vh,vl;
+  float scale=65.546;
 
   //read in data
   vh=wiringPiI2CReadReg8(imu,address);
@@ -114,7 +167,7 @@ void read_imu()
     vw=vw ^ 0xffff;
     vw=-vw-1;
   }
-  imu_data[3]=0;//  todo: convert vw from raw values to "g's"
+  imu_data[3]=vw*convert_g;//  todo: convert vw from raw values to "g's"
 
 
   address=61;//todo: set address value for accel y value
@@ -126,7 +179,7 @@ void read_imu()
     vw=vw ^ 0xffff;
     vw=-vw-1;
   }
-  imu_data[4]=0;//Todo: convert vw from raw valeus to "g's"
+  imu_data[4]=vw*convert_g;//Todo: convert vw from raw valeus to "g's"
 
 
   address=63;//todo: set addres value for accel z value;
@@ -138,7 +191,7 @@ void read_imu()
     vw=vw ^ 0xffff;
     vw=-vw-1;
   }
-  imu_data[5]=vw;//todo: convert vw from raw values to g's
+  imu_data[5]=-vw*convert_g;//todo: convert vw from raw values to g's
 
 
   address=67;//todo: set addres value for gyro x value;
@@ -150,7 +203,8 @@ void read_imu()
     vw=vw ^ 0xffff;
     vw=-vw-1;
   }
-  imu_data[0]=x_gyro_calibration+0;////todo: convert vw from raw values to degrees/second
+  imu_data[0]=-x_gyro_calibration+vw/scale;////todo: convert vw from raw values to degrees/second
+  imu_data[0]*=-1;
 
   address=69;//todo: set addres value for gyro y value;
   vh=wiringPiI2CReadReg8(imu,address);
@@ -161,7 +215,8 @@ void read_imu()
     vw=vw ^ 0xffff;
     vw=-vw-1;
   }
- imu_data[1]=y_gyro_calibration+0;////todo: convert vw from raw values to degrees/second
+  imu_data[1]=-y_gyro_calibration+vw/scale;////todo: convert vw from raw values to degrees/second
+  //imu_data[1]*=-1;
 
   address=71;////todo: set addres value for gyro z value;
   vh=wiringPiI2CReadReg8(imu,address);
@@ -172,10 +227,25 @@ void read_imu()
     vw=vw ^ 0xffff;
     vw=-vw-1;
   }
-  imu_data[2]=z_gyro_calibration+0;////todo: convert vw from raw values to degrees/second
+ // printf("%f\n",z_gyro_calibration+vw);
+  imu_data[2]=-z_gyro_calibration+vw/scale;////todo: convert vw from raw values to degrees/second
 
 
-  printf(imu_data[5] + '\n');
+  //printf("x accel\t%f\ny accel\t%f\nz accel\t%f\nx gyro\t%f\ny gyro\t%f\nz gyro\t%f\n", imu_data[3], imu_data[4], imu_data[5], imu_data[0], imu_data[1], imu_data[2]);
+  imu_cal[0] += imu_data[0];
+  imu_cal[1] += imu_data[1];
+  imu_cal[2] += imu_data[2];
+  imu_cal[3] += imu_data[5];
+  imu_cal[4] += imu_data[3];
+  imu_cal[5] += imu_data[4];
+
+  //float roll_accel = (atan2(imu_data[4],imu_data[5]))*180.0/3.1415 - roll_calibration;
+  //float pitch_accel = (atan2(imu_data[3],imu_data[5]))*180.0/3.1415 - pitch_calibration;
+  //printf("z gyro\t%f\n",imu_data[3]);
+  //printf("x gryo\t%f\t\ty gyro\t%f\t\tz gyro\t%f\t\troll_angle\t%f\t\tpitch_angle\t%f\n", imu_data[0], imu_data[1], imu_data[3], roll_angle, pitch_angle);
+
+  //printf("%f\t%f\t%f\n",imu_data[3],imu_data[4],imu_data[5]);
+
 
 }
 
@@ -198,6 +268,17 @@ void update_filter()
   time_prev=time_curr;
 
   //comp. filter for roll, pitch here:
+  float roll_accel = (atan2(imu_data[4],imu_data[5]))*180.0/3.1415 - roll_calibration;
+  float pitch_accel = (atan2(imu_data[3],imu_data[5]))*180.0/3.1415 - pitch_calibration;
+
+  float roll_gyro_delta = imu_data[0]*imu_diff;
+  float pitch_gyro_delta = imu_data[1]*imu_diff;
+
+  roll_angle = roll_accel*A + (1-A)*(roll_gyro_delta + roll_angle);
+  pitch_angle = pitch_accel*A + (1-A)*(pitch_gyro_delta + pitch_angle);
+
+  //printf("roll\t%f\tpitch\t%f\n",roll_angle,pitch_angle);
+  //printf("%f, %f, %f, %f, %f, %f\n",roll_angle,roll_accel,imu_data[0],pitch_angle,pitch_accel,imu_data[1]);
 }
 
 
@@ -245,4 +326,96 @@ int setup_imu()
   return 0;
 }
 
+void setup_keyboard()
+{
+  int segment_id;
+  struct shmid_ds shmbuffer;
+  int segment_size;
+  const int shared_segment_size = 0x6400;
+  int smhkey=33222;
 
+  /* Allocate a shared memory segment.  */
+  segment_id = shmget (smhkey, shared_segment_size,IPC_CREAT | 0666);
+  /* Attach the shared memory segment.  */
+  shared_memory = (Keyboard*) shmat (segment_id, 0, 0);
+  printf ("shared memory attached at address %p\n", shared_memory);
+  /* Determine the segment's size. */
+  shmctl (segment_id, IPC_STAT, &shmbuffer);
+  segment_size  =               shmbuffer.shm_segsz;
+  printf ("segment size: %d\n", segment_size);
+  /* Write a string to the shared memory segment.  */
+  //sprintf (shared_memory, "test!!!!.");
+
+
+
+}
+
+
+void trap(int signal)
+{
+
+   printf("ending program\n\r");
+
+   run_program=0;
+}
+
+
+void pulse(int heartbeat)
+{
+    if(heartbeat != previous_beat)
+    {
+        last_beat = time_curr;
+        previous_beat = heartbeat;
+    }
+
+    if((time_curr-last_beat) > .25*1000000000)
+    {
+        run_program = 0;
+        printf("keyboard timeout");
+    }
+}
+
+
+
+// TODO: print values that cause the program to stop
+void safety_check(char keypress, int heartbeat)
+{
+  if (imu_data[0] > 300 || imu_data[1] > 300 || imu_data[2] > 300)
+  {
+    run_program = 0;
+    printf("Gyro rate over 300\n");
+  }
+
+  if (imu_data[3] > 1.8 || imu_data[4] > 1.8 || imu_data[5] > 1.8)
+  {
+    run_program = 0;
+    printf("You hit something (accel > 1.8)\n");
+  }
+
+  if (imu_data[3] < .25 && imu_data[4] < .25 && imu_data[5] < .25)
+  {
+    run_program = 0;
+    printf("Quadrotor is free falling (accel < .25)\n");
+  }
+
+  if (roll_angle > 45 || roll_angle < -45)
+  {
+    run_program = 0;
+    printf("Too much roll\n");
+  }
+
+  if (pitch_angle > 45 || pitch_angle < -45)
+  {
+    run_program = 0;
+    printf("Too much pitch\n");
+  }
+
+  if(keypress==32) 
+  { 
+    run_program=0; 
+    printf("space pressed\n");
+  }
+
+  pulse(heartbeat);
+
+}
