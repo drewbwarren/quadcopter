@@ -89,8 +89,8 @@ struct Keyboard {
 Keyboard* shared_memory;
 int run_program=1;
 int pwm;
-
-
+float prev_roll = 0;
+float roll_I = 0;
 
 int main (int argc, char *argv[])
 {
@@ -134,25 +134,36 @@ void pid_update()
   float roll_error;
   roll_error = 0 - roll_angle;
 
-  int neutral_power;
-  neutral_power = 1100;
+  float roll_velocity;
+  roll_velocity = roll_angle - prev_roll;
 
-  float P;
+  int neutral_power;
+  neutral_power = 1150;
+
+  float P,D,I;
   P = 15;
+  D = 75;
+  I = 0.01;
+
+  roll_I += roll_error*I;
+  if (roll_I > 50) { roll_I = 50; }
+  if (roll_I < -50) { roll_I = -50;}
 
   float speed;
   float oldspeed;
 
-  speed = neutral_power + roll_error*P;
+  speed = neutral_power + roll_error*P + roll_velocity*D + roll_I;
   oldspeed = speed;
 
   set_PWM(0,speed);
   set_PWM(2,speed);
 
-  speed = neutral_power - roll_error*P;
+  speed = neutral_power - roll_error*P - roll_velocity*D - roll_I;
 
   set_PWM(1,speed);
   set_PWM(3,speed);
+
+  prev_roll = roll_angle;
 
   printf("%f, %f, %f, %f, %f\n",oldspeed, speed, oldspeed, speed, roll_angle);//debug part 2
 }
