@@ -89,8 +89,8 @@ struct Keyboard {
 Keyboard* shared_memory;
 int run_program=1;
 int pwm;
-float prev_roll = 0;
-float roll_I = 0;
+float prev_pitch = 0;
+float pitch_I = 0;
 
 int main (int argc, char *argv[])
 {
@@ -106,18 +106,7 @@ int main (int argc, char *argv[])
 
     setup_keyboard();
     signal(SIGINT, &trap);
-/*
-    float speed = 1000;
-    while (speed < 1500)
-    {
-      set_PWM(0,speed);
-      set_PWM(3,speed);
-      set_PWM(2,speed);
-      set_PWM(1,speed);
-      delay(500);
-      speed += 50;
-    }
-*/
+    
     while(run_program==1)
     {
       read_imu();
@@ -140,11 +129,11 @@ int main (int argc, char *argv[])
 
 void pid_update()
 {
-  float roll_error;
-  roll_error = 0 - roll_angle;
+  float pitch_error;
+  pitch_error = 0 - pitch_angle;
 
-  float roll_velocity;
-  roll_velocity = roll_angle - prev_roll;
+  float pitch_velocity;
+  pitch_velocity = pitch_angle - prev_pitch;
 
   int neutral_power;
   neutral_power = 1400;
@@ -154,27 +143,26 @@ void pid_update()
   D = 130;
   I = 0.0;
 
-  roll_I += roll_error*I;
-  if (roll_I > 50) { roll_I = 50; }
-  if (roll_I < -50) { roll_I = -50;}
+  pitch_I += pitch_error*I;
+  if (pitch_I > 50) { pitch_I = 50; }
+  if (pitch_I < -50) { pitch_I = -50;}
 
   float speed;
   float oldspeed;
 
-  speed = neutral_power + roll_error*P + roll_velocity*D + roll_I;
+  speed = neutral_power + pitch_error*P + pitch_velocity*D + pitch_I;
   oldspeed = speed;
 
   set_PWM(0,speed);
   set_PWM(2,speed);
 
-  speed = neutral_power - roll_error*P - roll_velocity*D - roll_I;
+  speed = neutral_power - pitch_error*P - pitch_velocity*D - pitch_I;
 
   set_PWM(1,speed);
   set_PWM(3,speed);
 
-  prev_roll = roll_angle;
+  prev_pitch = pitch_angle;
 
-  //printf("%f, %f, %f, %f, %f\n",oldspeed, speed, oldspeed, speed, roll_angle);//debug part 2
 }
 
 void calibrate_imu()
@@ -210,8 +198,8 @@ void calibrate_imu()
   float x_avg = imu_cal[4] / 1000.0;
   float y_avg = imu_cal[5] / 1000.0;
 
-  roll_calibration = (atan2(y_avg,accel_z_calibration))*180.0/3.1415;
-  pitch_calibration = (atan2(x_avg,accel_z_calibration))*180.0/3.1415;
+  pitch_calibration = (atan2(y_avg,accel_z_calibration))*180.0/3.1415;
+  roll_calibration = (atan2(x_avg,accel_z_calibration))*180.0/3.1415;
 
 printf("calibration complete, %f %f %f %f %f %f\n\r",x_gyro_calibration,y_gyro_calibration,z_gyro_calibration,roll_calibration,pitch_calibration,accel_z_calibration);
 
@@ -338,11 +326,11 @@ void update_filter()
   time_prev=time_curr;
 
   //comp. filter for roll, pitch here:
-  float roll_accel = (atan2(imu_data[4],imu_data[5]))*180.0/3.1415 - roll_calibration;
-  float pitch_accel = (atan2(imu_data[3],imu_data[5]))*180.0/3.1415 - pitch_calibration;
+  float pitch_accel = (atan2(imu_data[4],imu_data[5]))*180.0/3.1415 - pitch_calibration;
+  float roll_accel = (atan2(imu_data[3],imu_data[5]))*180.0/3.1415 - roll_calibration;
 
-  float roll_gyro_delta = imu_data[0]*imu_diff;
-  float pitch_gyro_delta = imu_data[1]*imu_diff;
+  float pitch_gyro_delta = imu_data[0]*imu_diff;
+  float roll_gyro_delta = imu_data[1]*imu_diff;
 
   roll_angle = roll_accel*A + (1-A)*(roll_gyro_delta + roll_angle);
   pitch_angle = pitch_accel*A + (1-A)*(pitch_gyro_delta + pitch_angle);
