@@ -21,7 +21,7 @@
 #define USER_CTRL        0x6A  // Bit 7 enable DMP, bit 3 reset DMP
 #define PWR_MGMT_1       0x6B // Device defaults to the SLEEP mode
 #define PWR_MGMT_2       0x6C
-#define PWM_MAX 1300
+#define PWM_MAX 1900
 #define frequency 25000000.0
 #define LED0 0x6
 #define LED0_ON_L 0x6
@@ -106,9 +106,18 @@ int main (int argc, char *argv[])
 
     setup_keyboard();
     signal(SIGINT, &trap);
-
-    printf("Motor 1, Motor 2, Motor 3, Motor 4, Pitch\n");//Debug part 1
-
+/*
+    float speed = 1000;
+    while (speed < 1500)
+    {
+      set_PWM(0,speed);
+      set_PWM(3,speed);
+      set_PWM(2,speed);
+      set_PWM(1,speed);
+      delay(500);
+      speed += 50;
+    }
+*/
     while(run_program==1)
     {
       read_imu();
@@ -138,12 +147,12 @@ void pid_update()
   roll_velocity = roll_angle - prev_roll;
 
   int neutral_power;
-  neutral_power = 1150;
+  neutral_power = 1400;
 
   float P,D,I;
-  P = 15;
-  D = 75;
-  I = 0.01;
+  P = 13;
+  D = 130;
+  I = 0.0;
 
   roll_I += roll_error*I;
   if (roll_I > 50) { roll_I = 50; }
@@ -165,7 +174,7 @@ void pid_update()
 
   prev_roll = roll_angle;
 
-  printf("%f, %f, %f, %f, %f\n",oldspeed, speed, oldspeed, speed, roll_angle);//debug part 2
+  //printf("%f, %f, %f, %f, %f\n",oldspeed, speed, oldspeed, speed, roll_angle);//debug part 2
 }
 
 void calibrate_imu()
@@ -453,20 +462,21 @@ void safety_check(char keypress, int heartbeat)
     set_PWM(3,1000);
     printf("Gyro rate over 300. x: %f y: %f z: %f\n",imu_data[0],imu_data[1],imu_data[2]);
   }
-
+/*
   if (imu_data[3] > 1.8 || imu_data[4] > 1.8 || imu_data[5] > 1.8)
   {
     run_program = 0;
 
     printf("Impact! Accel > 1.8. x: %f y: %f z: %f\n",imu_data[3],imu_data[4],imu_data[5]);
   }
-
-  if (imu_data[3] < .25 && imu_data[4] < .25 && imu_data[5] < .25)
+*/
+/*
+  if (fabs(imu_data[3]) < .25 && fabs(imu_data[4]) < .25 && fabs(imu_data[5]) < .25)
   {
     run_program = 0;
     printf("Free falling! Accel < .25. x: %f y: %f z: %f\n",imu_data[3],imu_data[4],imu_data[5]);
   }
-
+*/
   if (roll_angle > 45 || roll_angle < -45)
   {
     run_program = 0;
