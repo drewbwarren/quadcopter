@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <curses.h>
 
-//gcc -o student_code student_code.cpp -lwiringPi -lncurses -lm
+//gcc -o flight_manager flight_manager.cpp -lwiringPi -lncurses -lm
 
 #define frequency  25000000.0
 #define CONFIG           0x1A
@@ -19,9 +19,9 @@
 #define ACCEL_CONFIG     0x1C
 #define ACCEL_CONFIG2    0x1D
 #define USER_CTRL        0x6A  // Bit 7 enable DMP, bit 3 reset DMP
-#define PWR_MGMT_1       0x6B // Device defaults to the SLEEP mode
+#define PWR_MGMT_1       0x6B  // Device defaults to the SLEEP mode
 #define PWR_MGMT_2       0x6C
-#define PWM_MAX 1900
+#define PWM_MAX 1800
 #define frequency 25000000.0
 #define LED0 0x6
 #define LED0_ON_L 0x6
@@ -44,6 +44,7 @@ enum Gscale {
   GFS_2000DPS
 };
 
+//Function Declarations
 int setup_imu();
 void calibrate_imu();
 void read_imu();
@@ -69,6 +70,7 @@ float imu_data[6]; //gyro xyz, accel xyz
 float imu_cal[6]; // for finding the bias
 long time_curr;
 long time_prev;
+float time_total = 0;
 struct timespec te;
 float yaw=0;
 float pitch_angle=0;
@@ -106,7 +108,9 @@ int main (int argc, char *argv[])
 
     setup_keyboard();
     signal(SIGINT, &trap);
-    
+
+    printf("Pitch\n");//debug 01
+
     while(run_program==1)
     {
       read_imu();
@@ -129,6 +133,8 @@ int main (int argc, char *argv[])
 
 void pid_update()
 {
+  //printf("pitch:\t%f\n",pitch_angle);
+
   float pitch_error;
   pitch_error = 0 - pitch_angle;
 
@@ -136,32 +142,41 @@ void pid_update()
   pitch_velocity = pitch_angle - prev_pitch;
 
   int neutral_power;
-  neutral_power = 1400;
+  neutral_power = 1500;
 
   float P,D,I;
-  P = 13;
-  D = 130;
-  I = 0.0;
+  P = 12.5;
+  D = 150;
+  I = 0.03;
 
   pitch_I += pitch_error*I;
-  if (pitch_I > 50) { pitch_I = 50; }
-  if (pitch_I < -50) { pitch_I = -50;}
+  float I_max = 150;
+  if (pitch_I > I_max) { pitch_I = I_max; }
+  if (pitch_I < -I_max) { pitch_I = -I_max;}
 
   float speed;
   float oldspeed;
 
-  speed = neutral_power + pitch_error*P + pitch_velocity*D + pitch_I;
+
+  speed = neutral_power + pitch_error*P - pitch_velocity*D + pitch_I;
   oldspeed = speed;
+
+
+  printf("%f\n",pitch_angle);//debug 02
+  //printf("Pitch:\r%f\tP:\t%f\tD:\t%f\tI:\t%f\tPWM:\t%f\n",pitch_angle,pitch_error*P,-pitch_velocity*D,pitch_I,speed);
+
 
   set_PWM(0,speed);
   set_PWM(2,speed);
 
-  speed = neutral_power - pitch_error*P - pitch_velocity*D - pitch_I;
+  speed = neutral_power - pitch_error*P + pitch_velocity*D - pitch_I;
 
   set_PWM(1,speed);
   set_PWM(3,speed);
 
   prev_pitch = pitch_angle;
+
+  //printf("integrator:\r%f\n",pitch_I);
 
 }
 
